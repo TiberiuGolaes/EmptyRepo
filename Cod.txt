@@ -1,0 +1,177 @@
+package com.example.tiberiu.wifisignal;
+
+import android.os.Environment;
+import android.support.v7.app.ActionBarActivity;
+import android.os.Bundle;
+import android.view.Menu;
+import android.view.MenuItem;
+
+
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.util.List;
+import java.util.concurrent.TimeUnit;
+
+import android.app.Activity;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.net.wifi.ScanResult;
+import android.net.wifi.WifiManager;
+import android.net.wifi.WifiManager.WifiLock;
+import android.os.Bundle;
+import android.os.Handler;
+import android.util.Log;
+import android.view.View;
+import android.widget.Button;
+import android.widget.EditText;
+import android.widget.Toast;
+
+public class MainActivity extends Activity {
+
+    private static final String TAG = MainActivity.class.getSimpleName();
+
+    private static final long WIFI_SCAN_DELAY_MILLIS =500;
+    private static final int NR_SCANS=40;
+    private int nrExecutedScans;
+    private WifiManager wifiManager;
+    private WifiScanBroadcastReceiver wifiScanBroadcastReceiver = new WifiScanBroadcastReceiver();
+    private WifiLock wifiLock;
+    private Button scanButton;
+    private EditText roomText;
+    private String room;
+    private volatile boolean running;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
+        wifiManager = (WifiManager) getSystemService(Context.WIFI_SERVICE);
+        scanButton=(Button) findViewById(R.id.buttonScan);
+        roomText = (EditText) findViewById(R.id.scanText);
+        wifiLock = wifiManager.createWifiLock(WifiManager.WIFI_MODE_SCAN_ONLY,MainActivity.class.getName());
+        scanButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if(roomText.getText().toString().isEmpty())
+                {
+                    Toast x=Toast.makeText(getApplicationContext(),"Please insert room name",Toast.LENGTH_SHORT);
+                    x.show();
+                }
+                else
+                {
+                    room=roomText.getText().toString();
+                    running = true;
+                    nrExecutedScans=0;
+                    scanButton.setVisibility(View.INVISIBLE);
+                    wifiLock.acquire();
+                    try
+                    {
+                        File root = new File(Environment.getExternalStorageDirectory(), "WifiData");
+                        if (!root.exists()) {
+                            root.mkdirs();
+                            File gpxfile = new File(root, "SignalMeasurement.csv");
+                            FileWriter writer = new FileWriter(gpxfile,true);
+                            writer.write("Timestamp,AP mac,Device mac,Signal strength,Room\n");
+                            writer.flush();
+                            writer.close();
+                        }
+                    }
+                    catch(IOException e)
+                    {
+                        e.printStackTrace();
+
+                    }
+                    registerReceiver(wifiScanBroadcastReceiver, new IntentFilter(WifiManager.SCAN_RESULTS_AVAILABLE_ACTION));
+
+                    final Handler wifiScanHandler = new Handler();
+                    Runnable wifiScanRunnable = new Runnable() {
+
+                        @Override
+                        public void run() {
+                            if (!running || nrExecutedScans>=NR_SCANS) {
+                                return;
+                            }
+
+                            if (!wifiManager.startScan()) {
+                                Log.w(TAG, "Couldn't start Wi-fi scan!");
+                            }
+
+                            wifiScanHandler.postDelayed(this, WIFI_SCAN_DELAY_MILLIS);
+                        }
+
+                    };
+                    wifiScanHandler.post(wifiScanRunnable);
+                }
+            }
+        });
+    }
+
+    @Override
+    protected void onResume() {
+
+        super.onResume();
+    }
+
+    @Override
+    protected void onPause() {
+        running = false;
+
+        unregisterReceiver(wifiScanBroadcastReceiver);
+
+        wifiLock.release();
+
+        super.onPause();
+    }
+    @Override
+    protected void onStop() {
+        Log.w(TAG, "App stopped");
+
+        super.onStop();
+    }
+
+    @Override
+    protected void onDestroy() {
+        Log.w(TAG, "App destroyed");
+
+        super.onDestroy();
+    }
+
+    private final class WifiScanBroadcastReceiver extends BroadcastReceiver {
+
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (!running || !WifiManager.SCAN_RESULTS_AVAILABLE_ACTION.equals(intent.getAction())) {
+                return;
+            }
+        nrExecutedScans++;
+            if(nrExecutedScans==NR_SCANS)
+            {
+                scanButton.setVisibility(View.VISIBLE);
+                Toast x=Toast.makeText(getApplicationContext(),"Got the scan results",Toast.LENGTH_SHORT);
+                x.show();
+            }
+
+            List<ScanResult> scanResults = wifiManager.getScanResults();
+            try
+            {
+                File root = new File(Environment.getExternalStorageDirectory(), "WifiData");
+                File gpxfile = new File(root, "SignalMeasurement.csv");
+                FileWriter writer = new FileWriter(gpxfile,true);
+                writer.write(scanResults.get(0).timestamp+","+scanResults.get(0).SSID+","+scanResults.get(0).BSSID+","+scanResults.get(0).level+","+room+"\n");
+                writer.flush();
+                writer.close();
+            }
+            catch(IOException e)
+            {
+                e.printStackTrace();
+
+            }
+            System.out.println( scanResults.get(0).timestamp+" "+scanResults.get(0).SSID+" "+scanResults.get(0).BSSID+" "+scanResults.get(0).level);
+        }
+
+    }
+
+}
